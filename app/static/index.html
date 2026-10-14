@@ -6,7 +6,8 @@
   <title>Taskboard</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #222; }
-    h1 { margin-bottom: 24px; }
+    h1 { margin-bottom: 4px; }
+    #version { color: #888; font-size: 12px; margin-bottom: 24px; }
     form { display: flex; gap: 8px; margin-bottom: 16px; }
     input[type=text] { flex: 1; padding: 8px; font-size: 15px; }
     button { padding: 8px 14px; cursor: pointer; }
@@ -19,6 +20,7 @@
 </head>
 <body>
   <h1>Taskboard</h1>
+  <div id="version"></div>
   <form id="new">
     <input type="text" id="title" placeholder="What needs doing?" maxlength="200" required>
     <button type="submit">Add</button>
@@ -73,6 +75,10 @@
         load();
       } catch (e) { showError(e); }
     };
+
+    fetch("/version").then(r => r.ok ? r.json() : null).then(v => {
+      if (v) document.getElementById("version").textContent = `version ${v.version} · commit ${v.commit.slice(0, 7)}`;
+    }).catch(() => {});
 
     load();
   </script>

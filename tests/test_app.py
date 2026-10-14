@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import db
 from app.main import app
 
 
@@ -26,3 +27,23 @@ def test_validation():
     with TestClient(app) as client:
         assert client.post("/api/tasks", json={"title": ""}).status_code == 422
         assert client.patch("/api/tasks/1", json={}).status_code == 400
+
+
+def test_liveness_ignores_database_but_readiness_does_not(monkeypatch):
+    def broken():
+        raise RuntimeError("db down")
+
+    with TestClient(app) as client:
+        assert client.get("/readyz").json() == {"status": "ready", "database": "up"}
+        monkeypatch.setattr(db, "ping", broken)
+        assert client.get("/healthz").status_code == 200
+        ready = client.get("/readyz")
+        assert ready.status_code == 503
+        assert ready.json()["database"] == "down"
+
+
+def test_version_reports_build_metadata():
+    with TestClient(app) as client:
+        body = client.get("/version").json()
+    assert body["version"] == "test"
+    assert body["commit"] == "0" * 40

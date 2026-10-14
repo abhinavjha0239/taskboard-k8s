@@ -2,11 +2,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, insert, select, update
 
-from app.db import engine, init_db, tasks
+from app import db
+from app.config import settings
+from app.db import engine, tasks
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -22,11 +24,11 @@ class TaskPatch(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
+    db.init_db(settings.db_init_timeout_seconds)
     yield
 
 
-app = FastAPI(title="Taskboard", lifespan=lifespan)
+app = FastAPI(title="Taskboard", version=settings.app_version, lifespan=lifespan)
 
 
 def _row(r) -> dict:
@@ -36,6 +38,28 @@ def _row(r) -> dict:
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Liveness: the process is up and serving. Deliberately ignores the database
+    so a database outage makes pods unready instead of restarting them."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz():
+    """Readiness: only receive traffic when the database is reachable."""
+    try:
+        db.ping()
+    except Exception:
+        return JSONResponse({"status": "unavailable", "database": "down"}, status_code=503)
+    return {"status": "ready", "database": "up"}
+
+
+@app.get("/version")
+def version():
+    return {"version": settings.app_version, "commit": settings.git_commit, "build_time": settings.build_time}
 
 
 @app.get("/api/tasks")
