@@ -35,6 +35,8 @@ class Settings:
     # Tracing is only enabled when an OTLP endpoint is configured.
     otel_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "taskboard")
+    # Fault injection for reliability drills: fraction of /api requests that fail with 500.
+    chaos_error_rate: float = float(os.getenv("CHAOS_ERROR_RATE", "0"))
 
 
 settings = Settings()

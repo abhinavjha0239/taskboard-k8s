@@ -1,9 +1,10 @@
 import logging
+import random
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, insert, select, update
@@ -77,7 +78,13 @@ async def observe_requests(request: Request, call_next):
             )
 
 
-api = APIRouter(prefix="/api")
+def inject_faults() -> None:
+    """Reliability drill: fail a configurable fraction of API calls."""
+    if settings.chaos_error_rate and random.random() < settings.chaos_error_rate:
+        raise HTTPException(status_code=500, detail="injected fault (CHAOS_ERROR_RATE)")
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(inject_faults)])
 
 
 def _row(r) -> dict:

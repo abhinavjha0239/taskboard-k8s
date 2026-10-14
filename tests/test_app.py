@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
 from app import db
+from app.config import settings
 from app.main import app
 from app.observability import JsonFormatter
 
@@ -60,6 +61,13 @@ def test_metrics_use_route_template_not_raw_path():
     output = generate_latest().decode()
     assert 'route="/api/tasks/{task_id}"' in output
     assert "987654" not in output
+
+
+def test_fault_injection_only_hits_api(monkeypatch):
+    monkeypatch.setattr("app.main.settings", settings.__class__(chaos_error_rate=1.0))
+    with TestClient(app) as client:
+        assert client.get("/api/tasks").status_code == 500
+        assert client.get("/healthz").status_code == 200
 
 
 def test_json_log_format():
