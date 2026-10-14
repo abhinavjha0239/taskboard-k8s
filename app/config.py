@@ -27,8 +27,14 @@ class Settings:
     app_version: str = os.getenv("APP_VERSION", "dev")
     git_commit: str = os.getenv("GIT_COMMIT", "unknown")
     build_time: str = os.getenv("BUILD_TIME", "unknown")
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
     database_url: str = _database_url()
     db_init_timeout_seconds: float = float(os.getenv("DB_INIT_TIMEOUT_SECONDS", "60"))
+    # Port for the Prometheus scrape endpoint; 0 disables it (used in tests).
+    metrics_port: int = int(os.getenv("METRICS_PORT", "9000"))
+    # Tracing is only enabled when an OTLP endpoint is configured.
+    otel_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "taskboard")
 
 
 settings = Settings()

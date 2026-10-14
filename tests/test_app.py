@@ -1,7 +1,12 @@
+import json
+import logging
+
 from fastapi.testclient import TestClient
+from prometheus_client import generate_latest
 
 from app import db
 from app.main import app
+from app.observability import JsonFormatter
 
 
 def test_task_lifecycle():
@@ -47,3 +52,20 @@ def test_version_reports_build_metadata():
         body = client.get("/version").json()
     assert body["version"] == "test"
     assert body["commit"] == "0" * 40
+
+
+def test_metrics_use_route_template_not_raw_path():
+    with TestClient(app) as client:
+        client.patch("/api/tasks/987654", json={"done": True})
+    output = generate_latest().decode()
+    assert 'route="/api/tasks/{task_id}"' in output
+    assert "987654" not in output
+
+
+def test_json_log_format():
+    record = logging.LogRecord("taskboard", logging.INFO, __file__, 1, "request", None, None)
+    record.status = 201
+    entry = json.loads(JsonFormatter().format(record))
+    assert entry["msg"] == "request"
+    assert entry["level"] == "INFO"
+    assert entry["status"] == 201
