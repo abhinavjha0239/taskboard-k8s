@@ -106,3 +106,23 @@ spec:
         resources:
           requests:
             storage: {{ .Values.postgres.storage }}
+---
+# Database pods: only the web pods may connect, and no egress at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: taskboard
+      app.kubernetes.io/component: database
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: taskboard
+              app.kubernetes.io/component: web
+      ports:
+        - port: 5432

@@ -137,3 +137,60 @@ spec:
       port: 80
       targetPort: http
       nodePort: {{ .Values.service.nodePort }}
+---
+# Keeps one pod serving during voluntary disruptions such as a node drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskboard
+      app.kubernetes.io/component: web
+---
+# Web pods: HTTP from anywhere (it is the public entry point), metrics only
+# from the observability namespace. Egress only to PostgreSQL, DNS and Jaeger.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: taskboard
+      app.kubernetes.io/component: web
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - ports:
+        - port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 9000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: taskboard
+              app.kubernetes.io/component: database
+      ports:
+        - port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 4318
