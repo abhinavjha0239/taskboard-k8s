@@ -1,0 +1,139 @@
+{{- $name := .Release.Name }}
+{{- $tag := required "image.tag is required (git commit SHA)" .Values.image.tag }}
+# Dedicated identity with no RBAC bindings: the app never calls the Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  LOG_LEVEL: {{ .Values.app.logLevel | quote }}
+  CHAOS_ERROR_RATE: {{ .Values.app.chaosErrorRate | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.app.otelEndpoint | quote }}
+  OTEL_SERVICE_NAME: taskboard
+  METRICS_PORT: "9000"
+  DB_HOST: {{ $name }}-postgres
+  DB_NAME: {{ .Values.postgres.database | quote }}
+  DB_USER: {{ .Values.postgres.user | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: taskboard
+    app.kubernetes.io/component: web
+    app.kubernetes.io/version: {{ $tag | quote }}
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 5
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # A new pod must be Ready before an old one is removed: no capacity dip.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskboard
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskboard
+        app.kubernetes.io/component: web
+        app.kubernetes.io/version: {{ $tag | quote }}
+      annotations:
+        # Restart pods when the ConfigMap changes.
+        checksum/config: {{ .Values.app | toJson | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: metrics
+              containerPort: 9000
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: password
+          # Gives the app up to 90s to create the schema while PostgreSQL boots.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 45
+          # Liveness ignores the database: a restart cannot fix a DB outage.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Readiness checks the database: no traffic to pods that cannot serve it.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 2
+          lifecycle:
+            # Let the Service stop routing here before SIGTERM arrives.
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+# Only the app port is exposed; metrics (9000) stay inside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: taskboard
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: {{ .Values.service.nodePort }}
