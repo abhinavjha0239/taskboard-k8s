@@ -14,11 +14,13 @@ test: $(VENV) ## Lint, format check, unit tests, chart lint
 	$(VENV)/bin/python -m pytest -q
 	helm lint chart --strict --set image.tag=lint
 
-cluster: ## Create the kind cluster (1 node, capped at 2 CPU / 3 GB)
+cluster: ## Create the kind cluster (1 node, capped at 2 CPU / 3 GB) with Prometheus and Jaeger
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config kind.yaml --wait 2m
 	docker update --cpus 2 --memory 3g --memory-swap 3g $(CLUSTER)-control-plane >/dev/null
 	$(KUBECTL) create namespace $(NS) --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) label namespace $(NS) --overwrite pod-security.kubernetes.io/enforce=restricted
+	$(KUBECTL) apply -f observability.yaml
+	$(KUBECTL) -n observability rollout status deploy/prometheus deploy/jaeger --timeout 3m
 
 secret: ## Generate the database password inside the cluster (never on disk or in git)
 	@$(KUBECTL) -n $(NS) get secret taskboard-db >/dev/null 2>&1 && echo "secret taskboard-db exists" || \

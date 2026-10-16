@@ -9,3 +9,9 @@ nodes:
       - containerPort: 30080   # Taskboard
         hostPort: 8080
         listenAddress: "127.0.0.1"
+      - containerPort: 30090   # Prometheus
+        hostPort: 9090
+        listenAddress: "127.0.0.1"
+      - containerPort: 30686   # Jaeger UI
+        hostPort: 16686
+        listenAddress: "127.0.0.1"
