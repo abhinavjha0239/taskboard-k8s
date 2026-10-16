@@ -1,4 +1,5 @@
-# Lightweight observability for a laptop cluster: one Prometheus (metrics) and one Jaeger (traces), both in-memory/short retention.
+# Lightweight observability for a laptop cluster: one Prometheus (metrics +
+# SLO alerts) and one Jaeger (traces), both in-memory/short retention.
 # Applied by `make cluster`; needs the taskboard namespace to exist.
 apiVersion: v1
 kind: Namespace
@@ -48,6 +49,7 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
+    rule_files: [/etc/prometheus/alerts.yml]
     scrape_configs:
       # Every taskboard pod that exposes a container port named "metrics".
       - job_name: taskboard
@@ -63,6 +65,43 @@ data:
             target_label: pod
           - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version]
             target_label: version
+  # SLOs for /api routes: 99% of requests succeed, p95 latency under 300 ms.
+  alerts.yml: |
+    groups:
+      - name: taskboard
+        rules:
+          - alert: TaskboardDown
+            expr: sum(up{job="taskboard"}) < 1 or absent(up{job="taskboard"})
+            for: 1m
+            labels: {severity: critical}
+            annotations:
+              summary: No Taskboard pod is being scraped; users are likely getting errors.
+              runbook: README.md#runbook
+          - alert: TaskboardHighErrorRate
+            expr: |
+              sum(rate(taskboard_http_requests_total{route=~"/api/.*",status=~"5.."}[5m]))
+                / sum(rate(taskboard_http_requests_total{route=~"/api/.*"}[5m])) > 0.01
+            for: 2m
+            labels: {severity: critical}
+            annotations:
+              summary: More than 1% of API requests fail (SLO 99%).
+              runbook: README.md#runbook
+          - alert: TaskboardHighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(taskboard_http_request_duration_seconds_bucket{route=~"/api/.*"}[5m]))) > 0.3
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: API p95 latency is above 300 ms.
+              runbook: README.md#runbook
+          - alert: TaskboardDatabaseDown
+            expr: max(taskboard_db_up) == 0
+            for: 1m
+            labels: {severity: critical}
+            annotations:
+              summary: Taskboard pods cannot reach PostgreSQL.
+              runbook: README.md#runbook
 ---
 apiVersion: apps/v1
 kind: Deployment

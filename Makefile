@@ -41,6 +41,15 @@ deploy: build secret ## Rolling deploy of the current commit; Helm rolls back by
 smoke: ## User journey against 127.0.0.1:8080, checking the running commit
 	python3 scripts/smoke.py $(URL) $(TAG)
 
+signals: ## Check Prometheus scrapes both pods, alert rules are loaded and Jaeger has traces
+	@for i in $$(seq 30); do \
+	  up=$$(curl -sG 127.0.0.1:9090/api/v1/query --data-urlencode 'query=sum(up{job="taskboard"})' | jq -r '.data.result[0].value[1] // 0'); \
+	  [ "$$up" = 2 ] && break; sleep 3; done; echo "prometheus: $$up/2 web pods up"; [ "$$up" = 2 ]
+	@sleep 16  # one rule evaluation, so alert states reflect the scrape above
+	@curl -s 127.0.0.1:9090/api/v1/rules | jq -r '.data.groups[].rules[] | "alert \(.name): \(.state)"'
+	@for i in $$(seq 20); do curl -s 127.0.0.1:16686/api/v3/services | jq -e '.services | index("taskboard")' >/dev/null && break; sleep 3; done; \
+	  curl -s 127.0.0.1:16686/api/v3/services | jq -e '.services | index("taskboard")' >/dev/null && echo "jaeger: traces received from taskboard"
+
 status: ## Release history, pods with their version, and what is answering
 	$(HELM) history taskboard -n $(NS) --max 5
 	$(KUBECTL) -n $(NS) get pods -o wide -L app.kubernetes.io/version
@@ -53,6 +62,9 @@ rollback: ## Roll back to the previous Helm revision and re-run the user journey
 logs: ## Follow JSON app logs
 	$(KUBECTL) -n $(NS) logs -l app.kubernetes.io/component=web -f --max-log-requests 4
 
+load: ## Generate traffic for metrics and traces (Ctrl-C to stop)
+	while true; do curl -s -o /dev/null $(URL)/api/tasks; sleep 0.3; done
+
 pause: ## Stop the cluster container to free CPU/RAM (state is kept)
 	docker stop $(CLUSTER)-control-plane
 
@@ -62,4 +74,4 @@ resume: ## Start it again
 down: ## Delete the cluster
 	kind delete cluster --name $(CLUSTER)
 
-.PHONY: help test cluster secret build deploy smoke status rollback logs pause resume down
+.PHONY: help test cluster secret build deploy smoke signals status rollback logs load pause resume down
