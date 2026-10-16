@@ -36,6 +36,21 @@ deploy: build secret ## Rolling deploy of the current commit; Helm rolls back by
 	  --rollback-on-failure --wait --timeout 3m --history-max 10 --description "$(strip deploy $(TAG) $(ARGS))"
 	$(HELM) history taskboard -n $(NS) --max 3
 
+smoke: ## User journey against 127.0.0.1:8080, checking the running commit
+	python3 scripts/smoke.py $(URL) $(TAG)
+
+status: ## Release history, pods with their version, and what is answering
+	$(HELM) history taskboard -n $(NS) --max 5
+	$(KUBECTL) -n $(NS) get pods -o wide -L app.kubernetes.io/version
+	@curl -s $(URL)/version; echo
+
+rollback: ## Roll back to the previous Helm revision and re-run the user journey
+	$(HELM) rollback taskboard -n $(NS) --wait --force-conflicts
+	python3 scripts/smoke.py $(URL)
+
+logs: ## Follow JSON app logs
+	$(KUBECTL) -n $(NS) logs -l app.kubernetes.io/component=web -f --max-log-requests 4
+
 pause: ## Stop the cluster container to free CPU/RAM (state is kept)
 	docker stop $(CLUSTER)-control-plane
 
@@ -45,4 +60,4 @@ resume: ## Start it again
 down: ## Delete the cluster
 	kind delete cluster --name $(CLUSTER)
 
-.PHONY: help test cluster secret build deploy pause resume down
+.PHONY: help test cluster secret build deploy smoke status rollback logs pause resume down
