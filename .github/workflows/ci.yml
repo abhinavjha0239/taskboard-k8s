@@ -1,4 +1,6 @@
-# Every change: lint + unit tests and security scans.
+# Every change: lint + unit tests and security scans, then build and scan the
+# image, deploy that exact image to a throwaway kind cluster with the same
+# Makefile used locally, run the user journey and check metrics and traces.
 #
 # Third-party actions are pinned to commit SHAs (tag in the comment).
 name: CI/CD
@@ -66,3 +68,49 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
 
+  deploy:
+    name: Build, scan, deploy to kind, verify
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          fetch-depth: 0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.1.4
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.33.0
+          install_only: true
+      - run: make cluster
+      - run: make build TAG=$COMMIT
+      - name: Image vulnerabilities (trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: taskboard:${{ env.COMMIT }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - run: make deploy TAG=$COMMIT
+      - run: make smoke TAG=$COMMIT | tee smoke.txt
+      - run: make drift
+      - run: make signals | tee signals.txt
+      - name: Evidence summary
+        if: always()
+        run: |
+          {
+            echo "## Deployment evidence"
+            echo "- Commit: \`${COMMIT}\`"
+            echo "- Image: \`${IMAGE:-taskboard:${COMMIT} (not pushed)}\`"
+            echo '### helm history'; echo '```'; make -s status || true; echo '```'
+            echo '### User journey'; echo '```'; cat smoke.txt 2>/dev/null || echo "not run"; echo '```'
+            echo '### Signals'; echo '```'; cat signals.txt 2>/dev/null || echo "not run"; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n taskboard get all,events --sort-by=.lastTimestamp || true
+          kubectl -n taskboard logs -l app.kubernetes.io/name=taskboard --all-containers --tail 100 || true
+          kubectl -n observability get pods || true
