@@ -1,6 +1,16 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
+CLUSTER := taskboard
+NS := taskboard
+# Pin every command to the kind cluster so nothing lands on another context.
+KUBECTL := kubectl --context kind-$(CLUSTER)
+HELM := helm --kube-context kind-$(CLUSTER)
+TAG ?= $(shell git rev-parse HEAD)
+IMAGE := taskboard:$(TAG)
+URL := http://127.0.0.1:8080
+VENV ?= .venv
+
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
 
@@ -59,11 +69,20 @@ rollback: ## Roll back to the previous Helm revision and re-run the user journey
 	$(HELM) rollback taskboard -n $(NS) --wait --force-conflicts
 	python3 scripts/smoke.py $(URL)
 
+drift: ## Diff live objects against the chart in this repo (exit 1 = drift)
+	@tag=$$($(HELM) get values taskboard -n $(NS) -o json | jq -r .image.tag); \
+	helm template taskboard chart -n $(NS) --set image.tag=$$tag \
+	  | $(KUBECTL) diff -n $(NS) --server-side --field-manager=drift-check --force-conflicts -f - \
+	  && echo "no drift: live objects match the repo at $$tag"
+
 logs: ## Follow JSON app logs
 	$(KUBECTL) -n $(NS) logs -l app.kubernetes.io/component=web -f --max-log-requests 4
 
 load: ## Generate traffic for metrics and traces (Ctrl-C to stop)
 	while true; do curl -s -o /dev/null $(URL)/api/tasks; sleep 0.3; done
+
+backup: ## pg_dump the database to ./backup-<time>.sql (git-ignored)
+	$(KUBECTL) -n $(NS) exec taskboard-postgres-0 -- pg_dump -U taskboard taskboard > backup-$$(date +%Y%m%d-%H%M).sql
 
 pause: ## Stop the cluster container to free CPU/RAM (state is kept)
 	docker stop $(CLUSTER)-control-plane
@@ -74,4 +93,4 @@ resume: ## Start it again
 down: ## Delete the cluster
 	kind delete cluster --name $(CLUSTER)
 
-.PHONY: help test cluster secret build deploy smoke signals status rollback logs load pause resume down
+.PHONY: help test cluster secret build deploy smoke signals status rollback drift logs load backup pause resume down
