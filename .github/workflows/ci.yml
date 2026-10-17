@@ -1,6 +1,7 @@
 # Every change: lint + unit tests and security scans, then build and scan the
 # image, deploy that exact image to a throwaway kind cluster with the same
 # Makefile used locally, run the user journey and check metrics and traces.
+# Only an image that passed all of this is pushed to GHCR, tagged with its commit.
 #
 # Third-party actions are pinned to commit SHAs (tag in the comment).
 name: CI/CD
@@ -72,6 +73,9 @@ jobs:
     name: Build, scan, deploy to kind, verify
     needs: [test, security]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # GHCR push with the built-in token; no stored credentials
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,6 +101,14 @@ jobs:
       - run: make smoke TAG=$COMMIT | tee smoke.txt
       - run: make drift
       - run: make signals | tee signals.txt
+      - name: Push the verified image to GHCR
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${COMMIT}"
+          docker tag "taskboard:${COMMIT}" "$image"
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
       - name: Evidence summary
         if: always()
         run: |
