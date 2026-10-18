@@ -132,6 +132,35 @@ p95 latency under 300 ms, `taskboard_db_up == 1`, and `make smoke` passing.
 - **Traces:** OpenTelemetry spans for each HTTP request and SQL query, sent to Jaeger. A slow request can be followed to the exact query.
 - **Probes:** `startupProbe` covers schema creation, `livenessProbe` checks the process only, and `readinessProbe` also checks the DB.
 
+### Runbook
+
+| Alert | First check | Action |
+|---|---|---|
+| `TaskboardDown` | `make status`, `kubectl -n taskboard describe pod` | Bad image or config: `make rollback`. Pending pods: check node resources. |
+| `TaskboardHighErrorRate` | Did a release just happen? (`helm history`). `make logs \| jq 'select(.status>=500)'` | If it started with a release, `make rollback`. Otherwise follow a `trace_id` into Jaeger. |
+| `TaskboardHighLatency` | Jaeger: slowest traces, HTTP span or SQL span? | DB slow: check postgres pod CPU and memory. App slow: check CPU throttling against the limits. |
+| `TaskboardDatabaseDown` | `kubectl -n taskboard get pod taskboard-postgres-0`, then its logs | Restart the pod (data is on the PVC). Check the PVC and the secret. |
+
+**Verify recovery:** the alert returns to *inactive* in Prometheus, `make smoke` passes,
+and `make status` shows the expected version on all Ready pods.
+
+## Security
+
+- **Secrets:** `make secret` generates the DB password inside the cluster (`openssl rand`). It reaches pods through `secretKeyRef`. It never appears in git, Helm values, the image or logs. CI uses only the short-lived `GITHUB_TOKEN`.
+- **Runtime:**
+  - Both namespaces enforce the `restricted` Pod Security Standard.
+  - All containers run as non-root, with a read-only root filesystem, `drop: [ALL]` capabilities and the RuntimeDefault seccomp profile.
+  - The app gets no service-account token.
+  - Prometheus gets a Role that only lists pods in one namespace.
+- **Network:**
+  - NetworkPolicies: web accepts HTTP, and metrics only from `observability`. Web may only call PostgreSQL, DNS and Jaeger.
+  - PostgreSQL accepts only web pods and has no egress.
+  - Host ports bind to 127.0.0.1.
+- **Pipeline:**
+  - Scans: gitleaks, pip-audit, trivy (config and image), ruff `S` rules.
+  - Actions are pinned to commit SHAs. Permissions are read-only by default, and only the deploy job may write packages.
+- **Image:** multi-stage slim build, pip removed, UID 10001, build metadata in OCI labels.
+
 ## Decisions and what would change
 
 | Choice | Why | Under different requirements |
