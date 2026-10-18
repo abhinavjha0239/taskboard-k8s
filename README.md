@@ -12,7 +12,7 @@ no CI, no health endpoints, no metrics/logs/traces and no secret handling.
 PostgreSQL StatefulSet), a resource-capped kind cluster, a CI/CD pipeline that
 deploys every change to a throwaway cluster, release and rollback controls,
 Prometheus metrics with SLO alerts, JSON logs, Jaeger traces, and security
-checks across the pipeline and runtime.
+checks across the pipeline and runtime. Evidence is in [EVIDENCE.md](EVIDENCE.md).
 
 ## Architecture
 
@@ -142,7 +142,8 @@ p95 latency under 300 ms, `taskboard_db_up == 1`, and `make smoke` passing.
 | `TaskboardDatabaseDown` | `kubectl -n taskboard get pod taskboard-postgres-0`, then its logs | Restart the pod (data is on the PVC). Check the PVC and the secret. |
 
 **Verify recovery:** the alert returns to *inactive* in Prometheus, `make smoke` passes,
-and `make status` shows the expected version on all Ready pods.
+and `make status` shows the expected version on all Ready pods. EVIDENCE.md walks through
+a bad release, its detection and the rollback.
 
 ## Security
 
