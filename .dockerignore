@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+*.db
+.pytest_cache
+.ruff_cache
+tests
+chart
+scripts
+*.md
+*.yaml
+Makefile
+.env
+*.env

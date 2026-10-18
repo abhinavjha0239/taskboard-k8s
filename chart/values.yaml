@@ -1,0 +1,41 @@
+# One set of values for every environment (local kind and the CI kind cluster).
+# Only the image tag changes per deploy: `make deploy` sets it to the git commit.
+
+image:
+  repository: taskboard
+  tag: ""                 # required: the full git commit SHA of the build
+  pullPolicy: IfNotPresent  # images are side-loaded with `kind load`
+
+replicas: 2
+
+service:
+  nodePort: 30080         # kind maps it to http://127.0.0.1:8080
+
+app:
+  logLevel: INFO
+  # Reliability drill only: fraction of /api requests that fail with 500.
+  chaosErrorRate: "0"
+  # OTLP/HTTP collector for traces; empty disables tracing.
+  otelEndpoint: http://jaeger.observability:4318
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 192Mi
+
+postgres:
+  image: postgres:17.11-alpine
+  database: taskboard
+  user: taskboard
+  # Created by `make secret`, never stored in git or in Helm values.
+  secretName: taskboard-db
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
